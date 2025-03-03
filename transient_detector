@@ -1,0 +1,241 @@
+"""
+
+file_path : le chemin du fichier
+
+"""
+
+import os
+import matplotlib.pyplot as plt
+from tqdm import tqdm
+import numpy as np
+import scipy.io
+import glob
+import scipy.signal as sg
+
+file_path = '~'
+file = scipy.io.loadmat(file_path)
+indata = file['indata']
+
+fe = 51200
+piezo = indata[:,0]
+pickup = indata[:,2]
+N = len(indata)
+t = np.arange(0,N/fe,1/fe)
+
+piezoprime = np.zeros(N)
+    
+for i in range(N-1):
+    piezoprime[i] = piezo[i+1]-piezo[i]
+        
+win_len = 2048
+pp_height_factor = 1/3
+pp_prominences = 0.013
+pp_distance = 20
+
+xprime = np.array(np.abs(xprime))
+
+pp_height = np.zeros_like(xprime)
+
+for i in range(len(xprime)-win_len):
+    pp_height[int(win_len/2)+i] = np.max(xprime[i:win_len+i]) \
+        * pp_height_factor
+
+# Adjust initial and final height of signal (if not, height=0)
+pp_height[0:int(win_len/2)] = pp_height[int(win_len/2)]
+pp_height[-int(win_len/2):] = pp_height[-int(win_len/2)-1]
+
+
+peaks1 ,_ = sg.find_peaks(xprime,height = pp_height,prominence = pp_prominences)
+
+# plt.figure()
+# plt.plot(t[:511999],xprime)
+# plt.plot(t[peaks1],xprime[peaks1],'x')
+
+# plt.show()
+
+
+##########~~~~~~~~~~~~~~~~~~~~##########################
+#la méthode fonctionne, on essaie donc de l'appliquer sur le signal du pickup
+
+xpick = []
+xpick_diff = []
+for i in range(N):
+    xpick.append(indata[i,2])
+    
+for i in range(N-1):
+    xpick_diff.append(xpick[i+1]-xpick[i])
+    
+xpick_diff = np.array(np.abs(xpick_diff))
+
+peaks2,_ = sg.find_peaks(xpick_diff,height = pp_height,distance = 100,prominence = pp_prominences)
+
+# plt.figure()
+# plt.plot(t[:511999],xpick_diff)
+# plt.plot(t[peaks2],xpick_diff[peaks2],'x')
+
+spf_array = np.zeros_like(xprime)
+
+
+sig = indata[:,2]
+
+abs_sig_diff = np.abs(np.diff(sig))
+std_peaks_array = np.zeros_like(abs_sig_diff)
+
+
+nb_peaks = np.zeros_like(abs_sig_diff)
+for i in range(len(abs_sig_diff)-win_len):
+    nb_peaks[int(win_len/2)+i] = len(np.where(
+        np.logical_and(peaks2 >= i, peaks2 <= (win_len+i)))[0])
+    
+# plt.figure()
+# plt.plot(np.arange(len(nb_peaks))/fe,nb_peaks,label = "signal pickup")
+
+
+sig2 = indata[:,0]
+
+abs_sig_diff2 = np.abs(np.diff(sig2))
+std_peaks_array = np.zeros_like(abs_sig_diff2)
+
+nb_peaks2 = np.zeros_like(abs_sig_diff2)
+for i in range(len(abs_sig_diff2) - win_len):
+    nb_peaks2[int(win_len/2)+i] = len(np.where(np.logical_and(peaks1>=i,peaks1<=(win_len+i)))[0])
+    
+# plt.plot(np.arange(len(nb_peaks2))/fe,nb_peaks2,label = "signal piezzo")
+# plt.legend()
+# plt.grid()
+# plt.show()
+
+#############################################################################################
+
+spf_th_wide = 24
+std_th = 0.6
+
+def detect_onsets_from_peaks(abs_sig_diff, peaks, sr, lagtime_peak=0.1):
+    lagtime_peak_samples = int(lagtime_peak*sr)
+    onset_frames = np.array([])
+    # Only a peak can be an onset
+    for i in range(len(peaks)):
+        # If the peaks are in the first lagtime_peak seconds, we can not know
+        # if it is an onset
+        if peaks[i] < lagtime_peak_samples:
+            continue
+        # Number of peaks detected lagtime_peak seconds before current peak
+        arethey_peaks_before = len(np.where(
+            np.logical_and(peaks >= peaks[i] - lagtime_peak_samples,
+                           peaks < peaks[i]))[0])
+        # If there are no peaks lagtime_peak seconds before current peak
+        # --> ONSET DETECTED
+        if arethey_peaks_before == 0:
+            onset_frames = np.append(onset_frames, peaks[i])
+    return onset_frames/sr
+
+file_onsets = detect_onsets_from_peaks(abs_sig_diff, peaks1, fe,
+                                       lagtime_peak=0.1)
+file_onsets2 = detect_onsets_from_peaks(abs_sig_diff, peaks2, fe,
+                                       lagtime_peak=0.1)
+
+spf_array1 = np.zeros_like(xprime)
+
+for i in range(len(file_onsets)):
+    if i+1 == len(file_onsets):
+        next_onset = len(abs_sig_diff)
+    else:
+        next_onset = file_onsets[i+1]
+    
+    transient_end = -1
+    nb_peaks_cut = nb_peaks2[int(file_onsets[i]*fe):int(next_onset*fe)]
+    
+    for j in range(len(nb_peaks_cut)-win_len):
+        first_sample = int(file_onsets[i]*fe)+j
+        last_sample = int(file_onsets[i]*fe)+j+win_len
+        # Mean number of peaks in the current windowed nb_peaks function
+        mean_peaks = np.mean(nb_peaks2[first_sample:last_sample])
+        # Slipping Phase (pseudo)Frequency (spf) in Hz
+        spf = fe*mean_peaks/win_len
+        # Std
+        std_peaks1 = np.std(nb_peaks2[first_sample:last_sample])
+        # store both spf and std in respective arrays
+        spf_array1[first_sample] = spf
+        std_peaks_array[first_sample] = std_peaks1
+        
+        spf_th_low = 220/2**(1/spf_th_wide)
+        spf_th_up = 220*2**(1/spf_th_wide)
+        if spf_th_low < spf < spf_th_up:
+            if std_peaks1 < std_th:
+                transient_end = int(first_sample)  # in samples
+                break
+    if transient_end == -1:
+        continue
+
+
+
+# plt.figure()
+# plt.plot(np.arange(len(spf_array1))/fe,spf_array1,label = "signal piezzo")
+
+
+spf_array2 = np.zeros_like(xprime)
+
+
+for i in range(len(file_onsets2)):
+    if i+1 == len(file_onsets2):
+        next_onset = len(abs_sig_diff)
+    else:
+        next_onset = file_onsets2[i+1]
+    
+    transient_end = -1
+    nb_peaks_cut = nb_peaks[int(file_onsets2[i]*fe):int(next_onset*fe)]
+    
+    for j in range(len(nb_peaks_cut)-win_len):
+        first_sample = int(file_onsets2[i]*fe)+j
+        last_sample = int(file_onsets2[i]*fe)+j+win_len
+        # Mean number of peaks in the current windowed nb_peaks function
+        mean_peaks = np.mean(nb_peaks[first_sample:last_sample])
+        # Slipping Phase (pseudo)Frequency (spf) in Hz
+        spf = fe*mean_peaks/win_len
+        # Std
+        std_peaks = np.std(nb_peaks[first_sample:last_sample])
+        # store both spf and std in respective arrays
+        spf_array2[first_sample] = spf
+        std_peaks_array[first_sample] = std_peaks
+        
+        spf_th_low = 220/2**(1/spf_th_wide)
+        spf_th_up = 220*2**(1/spf_th_wide)
+        if spf_th_low < spf < spf_th_up:
+            if std_peaks < std_th:
+                transient_end = int(first_sample)  # in samples
+                break
+    if transient_end == -1:
+        continue
+    
+
+fig,ax = plt.subplots(nrows = 4,sharex = True)
+
+ax[0].plot(t,sig2,label = "signal piezzo")
+ax[0].plot(t,sig,label = "signal pickup")
+
+ax[1].plot(t[:511999],xprime,label = "signal piezzo")
+ax[1].plot(t[peaks1],xprime[peaks1],'x')
+
+ax[1].plot(t[:511999],xpick_diff,label = "signal pickup")
+ax[1].plot(t[peaks2],xpick_diff[peaks2],'x')
+
+ax[2].plot(np.arange(len(nb_peaks))/fe,nb_peaks,label = "signal pickup")
+ax[2].plot(np.arange(len(nb_peaks2))/fe,nb_peaks2,label = "signal piezzo")
+
+ax[3].plot(np.arange(len(spf_array1))/fe,spf_array1,label = "signal piezzo")
+ax[3].plot(np.arange(len(spf_array2))/fe,spf_array2,label = "signal pickup")
+
+ax[0].legend(fontsize = 15, loc = 'right')
+ax[1].legend(fontsize = 15)
+ax[2].legend(fontsize = 15)
+ax[3].legend(fontsize = 15)
+
+ax[3].set_xlabel("temps(s)",fontsize=20)
+
+ax[0].set_ylabel("x",fontsize=20)
+
+ax[1].set_ylabel("|x'|",fontsize=20)
+
+ax[2].set_ylabel("y[slips]",fontsize=20)
+
+ax[3].set_ylabel("SPF(Hz)",fontsize=20)
