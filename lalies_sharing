@@ -76,6 +76,55 @@ if dynamic == 'piano':
 # ax[1].legend()
 # fig.show()
 
+#%% Construction de la fonction nb_peaks
+
+nb_peaks = np.zeros_like(abs_sig_diff)
+for i in range(len(abs_sig_diff)-win_len):
+    nb_peaks[int(win_len/2)+i] = len(np.where(
+        np.logical_and(peaks >= i, peaks <= (win_len+i)))[0])
+
+# fig,ax = plt.subplots(nrows=2,sharex=True)
+# ax[0].plot(t,sig, label = "signal " + sensor)
+# ax[0].legend()
+# ax[1].plot(np.arange(len(nb_peaks))/fe,nb_peaks,label = "nombre de pics")
+# ax[1].legend()
+# fig.show()
+
+#%% Detection des onsets
+
+def detect_onsets_from_peaks(abs_sig_diff, peaks, sr, lagtime_peak=0.1):
+    lagtime_peak_samples = int(lagtime_peak*sr)
+    onset_frames = np.array([])
+    # Only a peak can be an onset
+    for i in range(len(peaks)):
+        # If the peaks are in the first lagtime_peak seconds, we can not know
+        # if it is an onset
+        if peaks[i] < lagtime_peak_samples:
+            continue
+        # Number of peaks detected lagtime_peak seconds before current peak
+        arethey_peaks_before = len(np.where(
+            np.logical_and(peaks >= peaks[i] - lagtime_peak_samples,
+                           peaks < peaks[i]))[0])
+        # If there are no peaks lagtime_peak seconds before current peak
+        # --> ONSET DETECTED
+        if arethey_peaks_before == 0:
+            onset_frames = np.append(onset_frames, peaks[i])
+    return onset_frames/sr
+
+file_onsets = detect_onsets_from_peaks(abs_sig_diff, peaks, fe,
+                                       lagtime_peak=0.1)
+
+# fig,ax = plt.subplots(nrows=2,sharex=True)
+# ax[0].plot(np.arange(len(piezo))*1/fe, piezo, label = "signal " + sensor)
+# ax[0].vlines(file_onsets1,-5,5, color = 'r', linestyle = '--', label = "Detected onsets")
+# ax[1].plot(np.arange(len(abs_sig_diff))*1/fe, abs_sig_diff, color = 'orange', label = "abs diff" + sensor)
+# ax[1].plot(t[peaks],pick_diff[peaks],'x', label = "pics")
+# ax[1].vlines(file_onsets,-5,5, color = 'r', linestyle = '--', label = "Detected onsets")
+# ax[1].plot(t[:511999], pp_height[:511999], color = "green")
+# fig.show()
+
+----------------------------------------------------------------------------
+
 #%% Detection des pics pour le piezo
 
 if sensor == "piezo":
