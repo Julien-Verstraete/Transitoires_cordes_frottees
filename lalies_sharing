@@ -1,108 +1,155 @@
 # -*- coding: utf-8 -*-
 """
-Created on Sat Mar  1 12:41:55 2025
+Created on Wed Mar  5 17:55:33 2025
 
 @author: Lalie
 """
 
-import os
 import matplotlib.pyplot as plt
-from tqdm import tqdm
 import numpy as np
 import scipy.io
-import glob
 import scipy.signal as sg
 
-file = scipy.io.loadmat("C:/Users/Lalie/Documents/M1 2024-2025/S2/Projet de recherche/analyse_python/DVC_pointe_piano_pousse_musician1_BowB_Astring.mat")
+file = scipy.io.loadmat("C:/Users/Lalie/Documents/M1 2024-2025/S2/Projet de recherche/analyse_python/DVC_pointe_piano_pousse_musician1_BowB_Astring")
 indata = file['indata']
 
-# fe = 51200
-# pickup = indata
-# N = len(indata)
-# t = np.arange(0,N/fe,1/fe)
+dynamic = "piano" # "piano" ou "forte"
+sensor = "piezo" # "piezo" ou "pickup"
 
-#%%  
+#%%  définition des variables
 
 fe = 51200
-piezo = indata[:,0]
-pickup = indata[:,2]
 N = len(indata)
 t = np.arange(0,N/fe,1/fe)
 
-piezoprime = np.zeros(N-1)
+if sensor == "piezo":
+    sig = indata[:,0]
+elif sensor == "pickup":
+    sig == indata[:,2]
+    
+if dynamic == "piano":
+    win_len = 512
+    pp_height_factor = 1/3
+    prominence = (0.002,None)
+    distance = 200
+elif dynamic == "forte":
+    win_len = 2048
+    pp_prominences = {'A': 0.013, 'C': 0.013}
+    pp_distances = {'A': 20, 'C': 20}
+    pp_height_factor = 1/3
+
+#%% Detection des pics du signal
+
+sig_diff = np.zeros(N-1)
     
 for i in range(N-1):
-    piezoprime[i] = piezo[i+1]-piezo[i]
+    sig_diff[i] = sig[i+1]-sig[i]
     
-piezoprime = np.abs(piezoprime)
-     
-win_len1 = 512
-pp_height_factor = 1/3
-prominence = (0.002,None)
-distance = 200
+abs_sig_diff = np.abs(sig_diff)
 
-pp_height = np.zeros_like(piezoprime)
-for i in range(len(piezoprime)-win_len1):
-    pp_height[int(win_len1/2)+i] = np.max(piezoprime[i:win_len1+i]) * pp_height_factor
+pp_height = np.zeros_like(abs_sig_diff)
+for i in range(len(abs_sig_diff)-win_len):
+    pp_height[int(win_len/2)+i] = np.max(abs_sig_diff[i:win_len+i]) * pp_height_factor
 
 # Adjust initial and final height of signal (if not, height=0)
-pp_height[0:int(win_len1/2)] = pp_height[int(win_len1/2)]
-pp_height[-int(win_len1/2):] = pp_height[-int(win_len1/2)-1]
+pp_height[0:int(win_len/2)] = pp_height[int(win_len/2)]
+pp_height[-int(win_len/2):] = pp_height[-int(win_len/2)-1]
 
-peakspiezo ,_ = sg.find_peaks(piezoprime,height=pp_height, distance = distance, prominence = prominence)
+peaks ,_ = sg.find_peaks(abs_sig_diff,height=pp_height, 
+                         distance = distance, prominence = prominence)
+
+# retirer les pics dûs au bruit de fond 
+
+if dynamic == 'piano':
+    delete_bruit = []
+    for i in range (1,len(peaks)-1):
+        if np.logical_and(peaks[i+1] - peaks[i] > 2*win_len, peaks[i] - peaks[i-1] > 2*win_len ):
+            delete_bruit.append(i)
+    peaks = np.delete(peaks, delete_bruit)
 
 # fig,ax = plt.subplots(nrows=2,sharex=True)
-# ax[0].plot(t[:511999],piezo[:511999], label = "signal piezo")
+# ax[0].plot(t[:511999],sig[:511999], label = "signal " + sensor)
 # ax[0].legend()
-# ax[1].plot(t[:511999],piezoprime, label = "Dérivée première du signal piezo")
-# ax[1].plot(t[peakspiezo],piezoprime[peakspiezo],'x', label = "pics")
+# ax[1].plot(t[:511999],abs_sig_diff, label = "Dérivée première du signal " + sensor)
+# ax[1].plot(t[peaks],abs_sig_diff[peaks],'x', label = "pics")
 # ax[1].plot(t[:511999], pp_height[:511999], color = "green")
 # ax[1].legend()
 # fig.show()
 
-#%%
+#%% Detection des pics pour le piezo
 
-pick_diff = np.zeros(N-1)
-for i in range(N-1):
-    pick_diff[i] = pickup[i+1]-pickup[i]
+if sensor == "piezo":
+    piezo = sig
+    
+    piezoprime = np.zeros(N-1)
+        
+    for i in range(N-1):
+        piezoprime[i] = piezo[i+1]-piezo[i]
+        
+    piezoprime = np.abs(piezoprime)
 
-pick_diff = np.abs(pick_diff)
+    pp_height = np.zeros_like(piezoprime)
+    for i in range(len(piezoprime)-win_len):
+        pp_height[int(win_len/2)+i] = np.max(piezoprime[i:win_len+i]) * pp_height_factor
 
-peakspick ,_ = sg.find_peaks(pick_diff,height=pp_height, distance = distance, prominence = prominence)
+    # Adjust initial and final height of signal (if not, height=0)
+    pp_height[0:int(win_len/2)] = pp_height[int(win_len/2)]
+    pp_height[-int(win_len/2):] = pp_height[-int(win_len/2)-1]
 
-# fig,ax = plt.subplots(nrows=2,sharex=True)
-# ax[0].plot(t[:511999],pickup[:511999], label = "signal pickup")
-# ax[0].legend()
-# ax[1].plot(t[:511999],pick_diff, label = "Dérivée première du signal pickup")
-# ax[1].plot(t[peakspick],pick_diff[peakspick],'x', label = "pics")
-# ax[1].plot(t[:511999], pp_height[:511999], color = "green")
-# ax[1].legend()
-# fig.show()
+    peakspiezo ,_ = sg.find_peaks(piezoprime,height=pp_height, distance = distance, prominence = prominence)
 
-#%%######################################################################
-#Fonction pour trier les pics isolés : ça ne marche pas du tout
+    # retirer les pics dûs au bruit de fond 
 
-win_len = 2048
+    if dynamic == 'piano':
+        delete_piezo = []
+        for i in range (1,len(peakspiezo)-1):
+            if np.logical_and(peakspiezo[i+1] - peakspiezo[i] > 2*win_len, peakspiezo[i] - peakspiezo[i-1] > 2*win_len ):
+                delete_piezo.append(i)
+        peakspiezo = np.delete(peakspiezo, delete_piezo)
 
+    # fig,ax = plt.subplots(nrows=2,sharex=True)
+    # ax[0].plot(t[:511999],piezo[:511999], label = "signal piezo")
+    # ax[0].legend()
+    # ax[1].plot(t[:511999],piezoprime, label = "Dérivée première du signal piezo")
+    # ax[1].plot(t[peakspiezo],piezoprime[peakspiezo],'x', label = "pics")
+    # ax[1].plot(t[:511999], pp_height[:511999], color = "green")
+    # ax[1].legend()
+    # fig.show()
 
-for p in peakspiezo:
-    i = 0
-    if np.logical_and(p-3*win_len not in peakspiezo, p+3*win_len not in peakspiezo) :
-        peakspiezo = np.delete(peakspiezo, i)
-    i = i+1
+#%% Detection des pics pour le pickup
 
-fig,ax = plt.subplots(nrows=2,sharex=True)
-ax[0].plot(t[:511999],piezo[:511999], label = "signal piezo")
-ax[0].legend()
-ax[1].plot(t[:511999],piezoprime, label = "Dérivée première du signal piezo")
-ax[1].plot(t[peakspiezo],piezoprime[peakspiezo],'x', label = "pics")
-ax[1].plot(t[:511999], pp_height[:511999], color = "green")
-ax[1].legend()
-fig.show()
+if sensor == "pickup":
+    pickup = sig
+    
+    pick_diff = np.zeros(N-1)
+    for i in range(N-1):
+        pick_diff[i] = pickup[i+1]-pickup[i]
 
-#%%
+    pick_diff = np.abs(pick_diff)
 
-win_len = 2048
+    peakspick ,_ = sg.find_peaks(pick_diff,height=pp_height, distance = distance, prominence = prominence)
+
+    # retirer les pics dûs au bruit de fond 
+
+    if dynamic == 'piano':
+        delete_pick = []
+        for i in range (1,len(peakspick)-1):
+            if np.logical_and(peakspick[i+1] - peakspick[i] > 2*win_len, peakspick[i] - peakspick[i-1] > 2*win_len ):
+                delete_pick.append(i)
+        peakspick = np.delete(peakspick, delete_pick)
+
+    # fig,ax = plt.subplots(nrows=2,sharex=True)
+    # ax[0].plot(t[:511999],pickup[:511999], label = "signal pickup")
+    # ax[0].legend()
+    # ax[1].plot(t[:511999],pick_diff, label = "Dérivée première du signal pickup")
+    # ax[1].plot(t[peakspick],pick_diff[peakspick],'x', label = "pics")
+    # ax[1].plot(t[:511999], pp_height[:511999], color = "green")
+    # ax[1].legend()
+    # fig.show()
+
+#%% Construction de la variable nb_peaks
+
+#win_len = 2048
 
 abs_sig1_diff = np.abs(np.diff(piezo))
 
@@ -138,7 +185,7 @@ for i in range(len(abs_sig2_diff) - win_len):
 # plt.grid()
 # plt.show()
 
-#%%############################################################################################
+#%% Detection du onset
 
 spf_th_wide = 24
 std_th = 0.6
@@ -167,113 +214,19 @@ file_onsets1 = detect_onsets_from_peaks(abs_sig1_diff, peakspiezo, fe,
 file_onsets2 = detect_onsets_from_peaks(abs_sig2_diff, peakspick, fe,
                                        lagtime_peak=0.1)
 
-spf_array1 = np.zeros_like(piezoprime)
+fig,ax = plt.subplots(nrows=4,sharex=True)
 
-for i in range(len(file_onsets1)):
-    if i+1 == len(file_onsets1):
-        next_onset = len(abs_sig1_diff)
-    else:
-        next_onset = file_onsets1[i+1]
-    
-    transient_end = -1
-    nb_peaks_cut = nb_peaks1[int(file_onsets1[i]*fe):int(next_onset*fe)]
-    
-    for j in range(len(nb_peaks_cut)-win_len):
-        first_sample = int(file_onsets1[i]*fe)+j
-        last_sample = int(file_onsets1[i]*fe)+j+win_len
-        # Mean number of peaks in the current windowed nb_peaks function
-        mean_peaks = np.mean(nb_peaks1[first_sample:last_sample])
-        # Slipping Phase (pseudo)Frequency (spf) in Hz
-        spf = fe*mean_peaks/win_len
-        # Std
-        std_peaks1 = np.std(nb_peaks1[first_sample:last_sample])
-        # store both spf and std in respective arrays
-        spf_array1[first_sample] = spf
-        std_peaks_array[first_sample] = std_peaks1
-        
-        spf_th_low = 220/2**(1/spf_th_wide)
-        spf_th_up = 220*2**(1/spf_th_wide)
-        if spf_th_low < spf < spf_th_up:
-            if std_peaks1 < std_th:
-                transient_end = int(first_sample)  # in samples
-                break
-    if transient_end == -1:
-        continue
+# ax[0].plot(np.arange(len(piezo))*1/fe, piezo, label = "piezo")
+# ax[0].vlines(file_onsets1,-5,5, color = 'r', linestyle = '--', label = "Detected onsets")
+# ax[1].plot(np.arange(len(abs_sig1_diff))*1/fe, abs_sig1_diff, color = 'orange', label = "abs diff piezo")
+# ax[1].plot(t[peakspick],pick_diff[peakspick],'x', label = "pics")
+# ax[1].vlines(file_onsets1,-5,5, color = 'r', linestyle = '--', label = "Detected onsets")
+# ax[1].plot(t[:511999], pp_height[:511999], color = "green")
+# ax[1].set_ylim(-0.3,0.3)
+# ax[2].plot(np.arange(len(pickup))*1/fe, pickup, label = "pickup")
+# ax[2].vlines(file_onsets2,-5,5, color = 'r', linestyle = '--', label = "Detected onsets")
+# ax[3].plot(np.arange(len(abs_sig2_diff))*1/fe, abs_sig2_diff, color = 'orange', label = "abs diff pickup")
+# ax[3].plot(t[peakspick],pick_diff[peakspick],'x', label = "pics")
+# ax[3].vlines(file_onsets2,-5,5, color = 'r', linestyle = '--', label = "Detected onsets")
 
-
-spf_array2 = np.zeros_like(pick_diff)
-
-for i in range(len(file_onsets2)):
-    if i+1 == len(file_onsets2):
-        next_onset = len(abs_sig2_diff)
-    else:
-        next_onset = file_onsets2[i+1]
-    
-    transient_end = -1
-    nb_peaks_cut = nb_peaks2[int(file_onsets2[i]*fe):int(next_onset*fe)]
-    
-    for j in range(len(nb_peaks_cut)-win_len):
-        first_sample = int(file_onsets2[i]*fe)+j
-        last_sample = int(file_onsets2[i]*fe)+j+win_len
-        # Mean number of peaks in the current windowed nb_peaks function
-        mean_peaks = np.mean(nb_peaks2[first_sample:last_sample])
-        # Slipping Phase (pseudo)Frequency (spf) in Hz
-        spf = fe*mean_peaks/win_len
-        # Std
-        std_peaks = np.std(nb_peaks2[first_sample:last_sample])
-        # store both spf and std in respective arrays
-        spf_array2[first_sample] = spf
-        std_peaks_array[first_sample] = std_peaks
-        
-        spf_th_low = 220/2**(1/spf_th_wide)
-        spf_th_up = 220*2**(1/spf_th_wide)
-        if spf_th_low < spf < spf_th_up:
-            if std_peaks < std_th:
-                transient_end = int(first_sample)  # in samples
-                break
-    if transient_end == -1:
-        continue
-    
-    
-# plt.figure()
-# plt.plot(np.arange(len(spf_array1))/fe,spf_array1,label = "signal piezzo")
-# plt.plot(np.arange(len(spf_array))/fe,spf_array,label = "signal pickup")
-# plt.xlabel("temps (s)")
-# plt.ylabel("SPF(hz)")
-# plt.legend()
-# plt.grid()
-# plt.show()    
-
-#%%
-
-fig,ax = plt.subplots(nrows = 4,sharex = True)
-
-ax[0].plot(t,piezo,label = "signal piezzo")
-ax[0].plot(t,pickup,label = "signal pickup")
-
-ax[1].plot(t[:511999],piezoprime,label = "signal piezzo")
-ax[1].plot(t[peakspiezo],piezoprime[peakspiezo],'x')
-
-ax[1].plot(t[:511999],pick_diff,label = "signal pickup")
-ax[1].plot(t[peakspick],pick_diff[peakspick],'x')
-
-ax[2].plot(np.arange(len(nb_peaks1))/fe,nb_peaks1,label = "signal pickup")
-ax[2].plot(np.arange(len(nb_peaks2))/fe,nb_peaks2,label = "signal piezzo")
-
-ax[3].plot(np.arange(len(spf_array1))/fe,spf_array1,label = "signal piezzo")
-ax[3].plot(np.arange(len(spf_array2))/fe,spf_array2,label = "signal pickup")
-
-ax[0].legend(fontsize = 15, loc = 'right')
-ax[1].legend(fontsize = 15)
-ax[2].legend(fontsize = 15)
-ax[3].legend(fontsize = 15)
-
-ax[3].set_xlabel("temps(s)",fontsize=20)
-
-ax[0].set_ylabel("x",fontsize=20)
-
-ax[1].set_ylabel("|x'|",fontsize=20)
-
-ax[2].set_ylabel("y[slips]",fontsize=20)
-
-ax[3].set_ylabel("SPF(Hz)",fontsize=20)
+# fig.show()
