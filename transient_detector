@@ -15,10 +15,10 @@ import scipy.io
 import glob
 
 
-display = 'OFF'
-savefile = 'ON'
+display = 'ON'
+savefile = 'OFF'
 csv_filename = 'pickup_piano_Astring'
-main_path = "C:/Users/Lalie/Documents/transitoires/"
+main_path = "C:/Users/Lalie/Documents/transitoires/analyse_pyhton"
 
 string = 'A'  # 'A' or 'C'
 string_frequency = {'A': 220, 'C': 65.4}
@@ -146,6 +146,16 @@ for filename in glob.glob('*' + string + 'string.mat'):
     peaks, _ = scipy.signal.find_peaks(abs_sig_diff, height=pp_height,
                                        prominence=pp_prominences[string],
                                        distance=pp_distances[string])
+    
+    # retirer les pics dûs au bruit de fond 
+
+    if dynamic == 'piano':
+        delete_bruit = []
+        for i in range (1,len(peaks)-2):
+            if np.logical_and(peaks[i+2] - peaks[i] > 2*win_len, peaks[i] - peaks[i-2] > 2*win_len ):
+                delete_bruit.append(i)    
+    peaks = np.delete(peaks, delete_bruit)
+
 
     # -- Detect onsets from peaks (first peak after 0.1 seconds of no peaks)
     file_onsets = detect_onsets_from_peaks(abs_sig_diff, peaks, sr,
