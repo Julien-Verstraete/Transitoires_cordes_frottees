@@ -1,0 +1,19 @@
+%% Code pour créer un fichier .wav du transitoire à écouter
+
+clear all, close all,
+
+load DVC_pointe_piano_pousse_musician2_Bowmusician_Astring.mat
+
+y = indata(:,3);
+Fs = freq;
+
+%% Opt. sélectionner un transitoire en particulier
+
+t_start = 2; % temps de départ en s
+t_end = 3; % temps d'arrivée en s
+y = y(t_start*Fs:t_end*Fs);
+
+%% Enregistrer le fichier
+
+audiowrite("pickup_DVC_pointe_piano_pousse_musician2_Bowmusician_Astring.wav",y,Fs)
+clear y Fs
